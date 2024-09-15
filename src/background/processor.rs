@@ -28,7 +28,6 @@ pub enum IPCData {
     FromMain(FromMainData),
 }
 
-// Makes things slightly easier
 impl IPCData {
     pub fn new_from_main(
         message: Message,
@@ -51,8 +50,32 @@ pub async fn parse_message(
     guild_id_to_tx: &mut HashMap<String, Arc<Sender<IPCData>>>,
     global_tx: &mut Sender<IPCData>,
 ) {
-    match &message {
-        _ => {}
+    if let Some(guild_id) = message.get_guild_id() {
+        let message_clone = message.clone();
+        if let Some(tx) = guild_id_to_tx.get(&guild_id) {
+            if tx.send(IPCData::new_from_background(message_clone)).is_err() {
+                error!("Failed to send message to specific guild {}", guild_id);
+            }
+        } else {
+            if global_tx.send(IPCData::new_from_background(message_clone)).is_err() {
+                error!("Failed to send message globally");
+            }
+        }
+    }
+}
+
+trait GuildIdProvider {
+    fn get_guild_id(&self) -> Option<String>;
+}
+
+impl GuildIdProvider for Message {
+    fn get_guild_id(&self) -> Option<String> {
+        match self {
+            Message::Response(r) => Some(r.guild_id.clone()),
+            Message::Request(r) => Some(r.guild_id.clone()),
+            Message::Event(e) => Some(e.guild_id.clone()),
+            _ => None,
+        }
     }
 }
 
@@ -91,7 +114,6 @@ pub async fn init_processor(
                 Err(e) => error!("{}", e),
             }
         }
-        // Receive messages from main function
         let rx_data = rx.try_recv();
         match rx_data {
             Ok(d) => {

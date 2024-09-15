@@ -1,17 +1,12 @@
-// Internal connector
 use crate::background::processor::IPCData;
-use crate::helpers::get_unix_timestamp;
 use crate::RavalinkConfig;
 use ravalink_interconnect::protocol::Message;
-use log::error;
 use nanoid::nanoid;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::ClientConfig;
 use snafu::prelude::*;
-use std::ops::Sub;
 use std::time::Duration;
-use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::broadcast::Receiver;
 use tokio::time::sleep;
 
@@ -66,7 +61,6 @@ pub async fn initialize_client(brokers: &String, config: &RavalinkConfig) -> Bas
 }
 
 pub async fn send_message(message: &Message, topic: &str, producer: &mut FutureProducer) {
-    // Send message to worker
     let data = serde_json::to_string(message).unwrap();
     let record: FutureRecord<String, String> = FutureRecord::to(topic).payload(&data);
     producer.send(record, Duration::from_secs(1)).await.unwrap();
@@ -86,30 +80,17 @@ pub async fn boilerplate_parse_ipc<T>(
 where
     T: FnMut(IPCData) -> bool,
 {
-    let start_time = get_unix_timestamp();
-    let mut run = true;
-    while run {
-        let rxm = rx.try_recv();
-        match rxm {
-            Ok(m) => {
-                run = ipc_parser(m);
-            }
-            Err(e) => match e {
-                TryRecvError::Empty => {}
-                _ => {
-                    error!("{}", e);
-                }
-            },
+    tokio::select! {
+        _ = sleep(timeout) => {
+            return Err(BoilerplateParseIPCError::TimedOutWaitingForIPC {});
         }
-
-        // Handle timeouts
-        let current_time = get_unix_timestamp();
-        ensure!(
-            current_time.sub(start_time).as_millis() < timeout.as_millis(),
-            TimedOutWaitingForIPCSnafu
-        );
-        // Don't max out the CPU
-        sleep(Duration::from_millis(150)).await;
+        result = async {
+            while let Ok(m) = rx.recv().await {
+                if ipc_parser(m) {
+                    return Ok(());
+                }
+            }
+            Ok(())
+        } => result
     }
-    Ok(())
 }
