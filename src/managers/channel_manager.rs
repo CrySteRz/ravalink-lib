@@ -1,4 +1,5 @@
 use ravalink_interconnect::protocol::{Command, Message, Request};
+use serenity::model::voice;
 use std::time::Duration;
 use crate::PlayerObject;
 use async_trait::async_trait;
@@ -29,7 +30,9 @@ pub trait ChannelManager {
         &mut self,
         voice_channel_id: String,
     ) -> Result<(), CreateJobError>;
-    async fn exit(&self) -> Result<(), ChannelManagerError>;
+    async fn exit(&mut self,
+        voice_channel_id: String,
+    ) -> Result<(), ChannelManagerError>;
 }
 
 #[async_trait]
@@ -51,7 +54,7 @@ impl ChannelManager for PlayerObject {
                     Message::Request(Request {
                         job_id: nanoid!(),
                         guild_id: guild_id.clone(),
-                        voice_channel_id: Some(voice_channel_id.clone()),
+                        voice_channel_id: voice_channel_id.clone(),
                         command: Command::Connect,
                         timestamp: get_timestamp(),
                     }),
@@ -82,7 +85,7 @@ impl ChannelManager for PlayerObject {
                     Message::Request(Request {
                         job_id: job_id_a.clone().unwrap(),
                         guild_id: guild_id.clone(),
-                        voice_channel_id: Some(voice_channel_id),
+                        voice_channel_id: voice_channel_id.clone(),
                         command: Command::Connect,
                         timestamp: get_timestamp(),
 
@@ -96,14 +99,17 @@ impl ChannelManager for PlayerObject {
 
         Ok(())
     }
-    async fn exit(&self) -> Result<(), ChannelManagerError> {
+    async fn exit(
+        &mut self,
+        voice_channel_id: String,
+    ) -> Result<(), ChannelManagerError> {
         self.bg_com_tx
             .send(IPCData::new_from_main(
                 Message::Request(Request {
                     job_id: self.job_id.read().await.clone().unwrap(),
                     command: Command::Stop,
                     guild_id: self.guild_id.clone(),
-                    voice_channel_id: None,
+                    voice_channel_id: voice_channel_id.clone(),
                     timestamp: get_timestamp()
                 }),
                 self.tx.clone(),

@@ -18,24 +18,24 @@ pub enum TrackActionError {
 
 #[async_trait]
 pub trait TrackManager {
-    async fn set_volume(&self, playback_volume: f32) -> Result<(), TrackActionError>;
-    async fn loop_song(&self) -> Result<(), TrackActionError>;
-    async fn seek(&self, position: Duration) -> Result<(), TrackActionError>;
-    async fn resume(&self) -> Result<(), TrackActionError>;
-    async fn pause(&self) -> Result<(), TrackActionError>;
+    async fn set_volume(&self, playback_volume: f32, voice_channel_id: String) -> Result<(), TrackActionError>;
+    async fn loop_song(&self, voice_channel_id: String) -> Result<(), TrackActionError>;
+    async fn seek(&self, position: Duration, voice_channel_id: String) -> Result<(), TrackActionError>;
+    async fn resume(&self, voice_channel_id: String) -> Result<(), TrackActionError>;
+    async fn pause(&self, voice_channel_id: String) -> Result<(), TrackActionError>;
 
 }
 
 #[async_trait]
 impl TrackManager for PlayerObject {
-    async fn set_volume(&self, playback_volume: f32) -> Result<(), TrackActionError> {
+    async fn set_volume(&self, playback_volume: f32, voice_channel_id: String) -> Result<(), TrackActionError> {
         self.bg_com_tx
             .send(IPCData::new_from_main(
                 Message::Request(Request {
                     job_id: self.job_id.read().await.clone().unwrap(),
                     command: Command::SetVolume { volume: playback_volume },
                     guild_id: self.guild_id.clone(),
-                    voice_channel_id: None,
+                    voice_channel_id: voice_channel_id.clone(),
                     timestamp: get_timestamp(),
                 }),
                 self.tx.clone(),
@@ -45,14 +45,14 @@ impl TrackManager for PlayerObject {
         Ok(())
     }
 
-    async fn loop_song(&self) -> Result<(), TrackActionError> {
+    async fn loop_song(&self, voice_channel_id: String) -> Result<(), TrackActionError> {
         self.bg_com_tx
             .send(IPCData::new_from_main(
                 Message::Request(Request {
                     job_id: self.job_id.read().await.clone().unwrap(),
                     command: Command::Loop,
                     guild_id: self.guild_id.clone(),
-                    voice_channel_id: None,
+                    voice_channel_id: voice_channel_id.clone(),
                     timestamp: get_timestamp(),
                 }),
                 self.tx.clone(),
@@ -63,14 +63,14 @@ impl TrackManager for PlayerObject {
         Ok(())
     }
 
-    async fn seek(&self, position: Duration) -> Result<(), TrackActionError> {
+    async fn seek(&self, position: Duration, voice_channel_id: String) -> Result<(), TrackActionError> {
         self.bg_com_tx
             .send(IPCData::new_from_main(
                 Message::Request(Request {
                     job_id: self.job_id.read().await.clone().unwrap(),
                     command: Command::SeekToPosition { position: position.as_millis() as u64 },
                     guild_id: self.guild_id.clone(),
-                    voice_channel_id: None,
+                    voice_channel_id: voice_channel_id.clone(),
                     timestamp: get_timestamp(),
                 }),
                 self.tx.clone(),
@@ -81,14 +81,14 @@ impl TrackManager for PlayerObject {
         Ok(())
     }
 
-    async fn resume(&self) -> Result<(), TrackActionError> {
+    async fn resume(&self, voice_channel_id: String) -> Result<(), TrackActionError> {
         self.bg_com_tx
             .send(IPCData::new_from_main(
                 Message::Request(Request {
                     job_id: self.job_id.read().await.clone().unwrap(),
                     command: Command::Resume,
                     guild_id: self.guild_id.clone(),
-                    voice_channel_id: None,
+                    voice_channel_id: voice_channel_id.clone(),
                     timestamp: get_timestamp()
                 }),
                 self.tx.clone(),
@@ -99,14 +99,14 @@ impl TrackManager for PlayerObject {
         Ok(())
     }
 
-    async fn pause(&self) -> Result<(), TrackActionError> {
+    async fn pause(&self, voice_channel_id: String) -> Result<(), TrackActionError> {
         self.bg_com_tx
             .send(IPCData::new_from_main(
                 Message::Request(Request {
                     job_id: self.job_id.read().await.clone().unwrap(),
                     command: Command::Pause,
                     guild_id: self.guild_id.clone(),
-                    voice_channel_id: None,
+                    voice_channel_id: voice_channel_id.clone(),
                     timestamp: get_timestamp(),
                 }),
                 self.tx.clone(),
