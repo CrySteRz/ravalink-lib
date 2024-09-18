@@ -15,19 +15,19 @@ pub enum PlayerActionError {
 
 #[async_trait]
 pub trait Player {
-    async fn play(&mut self, url: String, voice_channel_id: String) -> Result<(), PlayerActionError>;
+    async fn play(&mut self, url: String) -> Result<(), PlayerActionError>;
 }
 
 #[async_trait]
 impl Player for PlayerObject {
-    async fn play(&mut self, url: String, voice_channel_id: String) -> Result<(), PlayerActionError> {
+    async fn play(&mut self, url: String) -> Result<(), PlayerActionError> {
         self.bg_com_tx
             .send(IPCData::new_from_main(
                 Message::Request(Request {
                     job_id: self.job_id.clone().read().await.clone().unwrap(),
                     command: Command::Play { url: url.clone() },
                     guild_id: self.guild_id.clone(),
-                    voice_channel_id: voice_channel_id.clone(),
+                    voice_channel_id: None,
                     timestamp: get_timestamp(),
                 }),
                 self.tx.clone(),

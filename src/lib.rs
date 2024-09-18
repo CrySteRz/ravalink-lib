@@ -3,6 +3,7 @@ use crate::background::processor::{init_processor, IPCData};
 use lazy_static::lazy_static;
 use rdkafka::producer::FutureProducer;
 use std::collections::HashMap;
+use std::num::NonZero;
 use std::sync::Arc;
 
 use tokio::sync::broadcast::{Receiver, Sender};
@@ -27,13 +28,13 @@ lazy_static! {
 
 pub struct PlayerObject {
     job_id: Arc<RwLock<Option<String>>>,
-    guild_id: String,
+    guild_id: NonZero<u64>,
     tx: Arc<Sender<IPCData>>,
     bg_com_tx: Sender<IPCData>,
 }
 
 impl PlayerObject {
-    pub async fn new(guild_id: String, com_tx: Sender<IPCData>) -> Result<Self, CreateJobError> {
+    pub async fn new(guild_id: NonZero<u64>, com_tx: Sender<IPCData>) -> Result<Self, CreateJobError> {
         let (tx, _rx) = broadcast::channel(16);
 
         let handler = PlayerObject {

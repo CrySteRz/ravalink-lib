@@ -5,7 +5,7 @@ use log::{debug, error};
 use rdkafka::consumer::BaseConsumer;
 use rdkafka::producer::FutureProducer;
 use rdkafka::Message as KafkaMessage;
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZero};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::{Receiver, Sender};
@@ -19,7 +19,7 @@ pub struct FromBackgroundData {
 pub struct FromMainData {
     pub message: Message,
     pub response_tx: Arc<Sender<IPCData>>,
-    pub guild_id: String,
+    pub guild_id: NonZero<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -32,7 +32,7 @@ impl IPCData {
     pub fn new_from_main(
         message: Message,
         sender: Arc<Sender<IPCData>>,
-        guild_id: String,
+        guild_id: NonZero<u64>,
     ) -> IPCData {
         IPCData::FromMain(FromMainData {
             message,
@@ -47,10 +47,10 @@ impl IPCData {
 
 pub async fn parse_message(
     message: Message,
-    guild_id_to_tx: &mut HashMap<String, Arc<Sender<IPCData>>>,
+    guild_id_to_tx: &mut HashMap<NonZero<u64>, Arc<Sender<IPCData>>>,
     global_tx: &mut Sender<IPCData>,
 ) {
-    if let Some(guild_id) = message.get_guild_id() {
+    let guild_id = message.get_guild_id();
         let message_clone = message.clone();
         if let Some(tx) = guild_id_to_tx.get(&guild_id) {
             if tx.send(IPCData::new_from_background(message_clone)).is_err() {
@@ -62,19 +62,21 @@ pub async fn parse_message(
             }
         }
     }
-}
+
 
 trait GuildIdProvider {
-    fn get_guild_id(&self) -> Option<String>;
+    fn get_guild_id(&self) -> NonZero<u64>;
 }
 
 impl GuildIdProvider for Message {
-    fn get_guild_id(&self) -> Option<String> {
+    fn get_guild_id(&self) -> NonZero<u64> {
         match self {
-            Message::Response(r) => Some(r.guild_id.clone()),
-            Message::Request(r) => Some(r.guild_id.clone()),
-            Message::Event(e) => Some(e.guild_id.clone()),
-            _ => None,
+            Message::Response(r) => r.guild_id.clone(),
+            Message::Request(r) => r.guild_id.clone(),
+            Message::Event(e) => e.guild_id.clone(),
+            Message::Ping => todo!(),
+            Message::Pong(pong) => todo!(),
+            
         }
     }
 }
@@ -86,7 +88,7 @@ pub async fn init_processor(
     mut producer: FutureProducer,
     config: RavalinkConfig,
 ) {
-    let mut guild_id_to_tx: HashMap<String, Arc<Sender<IPCData>>> = HashMap::new();
+    let mut guild_id_to_tx: HashMap<NonZero<u64>, Arc<Sender<IPCData>>> = HashMap::new();
     loop {
         let mss = consumer.poll(Duration::from_millis(25));
         if let Some(p) = mss {

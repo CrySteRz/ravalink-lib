@@ -1,5 +1,6 @@
 use ravalink_interconnect::protocol::{Command, Message, Request};
 use serenity::model::voice;
+use std::num::NonZero;
 use std::time::Duration;
 use crate::PlayerObject;
 use async_trait::async_trait;
@@ -28,10 +29,9 @@ pub enum ChannelManagerError {
 pub trait ChannelManager {
     async fn connect(
         &mut self,
-        voice_channel_id: String,
+        voice_channel_id: NonZero<u64>,
     ) -> Result<(), CreateJobError>;
-    async fn exit(&mut self,
-        voice_channel_id: String,
+    async fn stop(&mut self
     ) -> Result<(), ChannelManagerError>;
 }
 
@@ -39,7 +39,7 @@ pub trait ChannelManager {
 impl ChannelManager for PlayerObject {
     async fn connect(
         &mut self,
-        voice_channel_id: String,
+        voice_channel_id: NonZero<u64>,
     ) -> Result<(), CreateJobError> {
         let guild_id = self.guild_id.clone();
 
@@ -54,7 +54,7 @@ impl ChannelManager for PlayerObject {
                     Message::Request(Request {
                         job_id: nanoid!(),
                         guild_id: guild_id.clone(),
-                        voice_channel_id: voice_channel_id.clone(),
+                        voice_channel_id: Some(voice_channel_id.clone()),
                         command: Command::Connect,
                         timestamp: get_timestamp(),
                     }),
@@ -85,7 +85,7 @@ impl ChannelManager for PlayerObject {
                     Message::Request(Request {
                         job_id: job_id_a.clone().unwrap(),
                         guild_id: guild_id.clone(),
-                        voice_channel_id: voice_channel_id.clone(),
+                        voice_channel_id: Some(voice_channel_id.clone()),
                         command: Command::Connect,
                         timestamp: get_timestamp(),
 
@@ -99,9 +99,8 @@ impl ChannelManager for PlayerObject {
 
         Ok(())
     }
-    async fn exit(
+    async fn stop(
         &mut self,
-        voice_channel_id: String,
     ) -> Result<(), ChannelManagerError> {
         self.bg_com_tx
             .send(IPCData::new_from_main(
@@ -109,7 +108,7 @@ impl ChannelManager for PlayerObject {
                     job_id: self.job_id.read().await.clone().unwrap(),
                     command: Command::Stop,
                     guild_id: self.guild_id.clone(),
-                    voice_channel_id: voice_channel_id.clone(),
+                    voice_channel_id: None,
                     timestamp: get_timestamp()
                 }),
                 self.tx.clone(),
