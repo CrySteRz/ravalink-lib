@@ -1,5 +1,4 @@
 use ravalink_interconnect::protocol::{Command, Message, Request};
-use serenity::model::voice;
 use std::num::NonZero;
 use std::time::Duration;
 use crate::PlayerObject;
@@ -31,7 +30,7 @@ pub trait ChannelManager {
         &mut self,
         voice_channel_id: NonZero<u64>,
     ) -> Result<(), CreateJobError>;
-    async fn stop(&mut self
+    async fn stop(&self
     ) -> Result<(), ChannelManagerError>;
 }
 
@@ -100,8 +99,9 @@ impl ChannelManager for PlayerObject {
         Ok(())
     }
     async fn stop(
-        &mut self,
+        &self,
     ) -> Result<(), ChannelManagerError> {
+        print!("Stopping");
         self.bg_com_tx
             .send(IPCData::new_from_main(
                 Message::Request(Request {
