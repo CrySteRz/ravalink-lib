@@ -1,17 +1,22 @@
-use crate::managers::channel_manager::CreateJobError;
-use crate::background::processor::{init_processor, IPCData};
+
+use crate::background::processor::{init_processor, RavalinkIPC};
 use lazy_static::lazy_static;
+use log::error;
+use ravalink_interconnect::protocol::{Command, Message, Request};
 use rdkafka::producer::FutureProducer;
+use snafu::Snafu;
 use std::collections::HashMap;
 use std::num::NonZero;
 use std::sync::Arc;
-
+use tokio::sync::broadcast::error::SendError;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio::sync::{broadcast, Mutex, RwLock};
-
-
+use nanoid::nanoid;
+use crate::helpers::get_timestamp;
+use snafu::ResultExt;
 pub mod managers;
 pub mod background;
+pub mod handlers;
 
 mod helpers;
 pub mod serenity;
@@ -22,23 +27,28 @@ use rdkafka::consumer::StreamConsumer;
 lazy_static! {
     pub(crate) static ref PRODUCER: Mutex<Option<FutureProducer>> = Mutex::new(None);
     pub(crate) static ref CONSUMER: Mutex<Option<StreamConsumer>> = Mutex::new(None);
-    pub(crate) static ref TX: Mutex<Option<Sender<String>>> = Mutex::new(None);
-    pub(crate) static ref RX: Mutex<Option<Receiver<String>>> = Mutex::new(None);
+    pub(crate) static ref TX: Mutex<Option<Sender<RavalinkIPC>>> = Mutex::new(None);
+    pub(crate) static ref RX: Mutex<Option<Receiver<RavalinkIPC>>> = Mutex::new(None);
+}
+
+#[derive(Debug, Snafu)]
+pub enum PlayerError {
+    InitializationError,
+    FailedToReceiveIPCResponse,
+    FailedToSendIPCRequest { source: SendError<RavalinkIPC> },
 }
 
 pub struct PlayerObject {
-    job_id: Arc<RwLock<Option<String>>>,
     guild_id: NonZero<u64>,
-    tx: Arc<Sender<IPCData>>,
-    bg_com_tx: Sender<IPCData>,
+    tx: Arc<Sender<RavalinkIPC>>,
+    bg_com_tx: Sender<RavalinkIPC>,
 }
 
 impl PlayerObject {
-    pub async fn new(guild_id: NonZero<u64>, com_tx: Sender<IPCData>) -> Result<Self, CreateJobError> {
+    pub async fn new(guild_id: NonZero<u64>, com_tx: Sender<RavalinkIPC>) -> Result<Self, PlayerError> {
         let (tx, _rx) = broadcast::channel(16);
 
         let handler = PlayerObject {
-            job_id: Arc::new(RwLock::new(None)),
             guild_id,
             tx: Arc::new(tx),
             bg_com_tx: com_tx,
@@ -46,12 +56,61 @@ impl PlayerObject {
 
         Ok(handler)
     }
+
+    async fn send_request_with_response(
+        &self,
+        command: Command,
+        voice_channel_id: Option<NonZero<u64>>,
+    ) -> Result<Message, PlayerError> {
+        let job_id = nanoid!();
+        let guild_id = self.guild_id.clone();
+
+        self.bg_com_tx
+            .send(RavalinkIPC::create_bot_request(
+                Message::Request(Request {
+                    job_id: job_id.clone(),
+                    guild_id: guild_id.clone(),
+                    voice_channel_id,
+                    command,
+                    timestamp: get_timestamp(),
+                }),
+                self.tx.clone(),
+                self.guild_id.clone(),
+            ))
+            .context(FailedToSendIPCRequestSnafu)?;
+        
+        self.wait_for_response(job_id, guild_id).await
+    }
+
+    //Probably need to implement a timeout here
+    pub async fn wait_for_response(
+        &self,
+        job_id: String,
+        guild_id: NonZero<u64>,
+    ) -> Result<Message, PlayerError > {
+        let mut rx = self.tx.subscribe();
+        loop {
+            match rx.recv().await {
+                Ok(RavalinkIPC::Message(response)) => {
+                    if let Message::Response(res) = &response.message {
+                        if res.job_id == job_id && res.guild_id == guild_id {
+                            return Ok(response.message.clone());
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to receive response: {:?}", e);
+                    return Err(PlayerError::FailedToReceiveIPCResponse);
+                }
+            }
+        }
+    }
 }
 
 pub struct Ravalink {
     pub players: Arc<RwLock<HashMap<String, PlayerObject>>>,
-    pub tx: Sender<IPCData>,
-    pub rx: Receiver<IPCData>,
+    pub tx: Sender<RavalinkIPC>,
+    pub rx: Receiver<RavalinkIPC>,
 }
 
 #[derive(Clone)]
@@ -77,25 +136,31 @@ pub struct RavalinkConfig {
 
 
 pub async fn init_ravalink(broker: String, config: RavalinkConfig) -> Arc<Mutex<Ravalink>> {
-
     let consumer = initialize_client(&broker, &config).await;
-
     let producer = initialize_producer(&broker, &config);
 
-    let (tx, rx) = broadcast::channel(16);
 
-    let global_rx = tx.subscribe();
-    let sub_tx = tx.clone();
+    let (tx, _rx) = broadcast::channel(16);
+
+    {
+        let mut tx_lock = TX.lock().await;
+        *tx_lock = Some(tx.clone());
+    }
+
+    {
+        let mut rx_lock = RX.lock().await;
+        *rx_lock = Some(tx.subscribe());
+    }
+
+    let task_tx = tx.clone();
 
     tokio::task::spawn(async move {
-        init_processor(rx, sub_tx, consumer, producer, config).await;
+        init_processor(task_tx.subscribe(), task_tx, consumer.into(), producer, config).await;
     });
 
-    let c_instance = Ravalink {
+    Arc::new(Mutex::new(Ravalink {
         players: Arc::new(RwLock::new(HashMap::new())),
-        tx,
-        rx: global_rx,
-    };
-
-    Arc::new(Mutex::new(c_instance))
+        tx: tx.clone(),
+        rx: tx.subscribe(),
+    }))
 }

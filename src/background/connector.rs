@@ -1,14 +1,10 @@
-use crate::background::processor::IPCData;
 use crate::RavalinkConfig;
 use ravalink_interconnect::protocol::Message;
 use nanoid::nanoid;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::ClientConfig;
-use snafu::prelude::*;
 use std::time::Duration;
-use tokio::sync::broadcast::Receiver;
-use tokio::time::sleep;
 
 fn configure_kafka_ssl(mut kafka_config: ClientConfig, config: &RavalinkConfig) -> ClientConfig {
     if config.ssl.is_some() {
@@ -31,15 +27,13 @@ fn configure_kafka_ssl(mut kafka_config: ClientConfig, config: &RavalinkConfig) 
 
 pub fn initialize_producer(broker: &str, config: &RavalinkConfig) -> FutureProducer {
     let mut kafka_config = ClientConfig::new().set("bootstrap.servers", broker).clone();
-
     kafka_config = configure_kafka_ssl(kafka_config, config);
-
     let producer: FutureProducer = kafka_config.create().expect("Failed to create Producer");
-
+    
     producer
 }
 
-pub async fn initialize_client(brokers: &String, config: &RavalinkConfig) -> BaseConsumer {
+pub async fn initialize_client(brokers: &String, config: &RavalinkConfig) -> StreamConsumer {
     let mut kafka_config = ClientConfig::new()
         .set("group.id", nanoid!())
         .set("bootstrap.servers", brokers)
@@ -51,7 +45,7 @@ pub async fn initialize_client(brokers: &String, config: &RavalinkConfig) -> Bas
 
     kafka_config = configure_kafka_ssl(kafka_config, config);
 
-    let consumer: BaseConsumer = kafka_config.create().expect("Failed to create Consumer");
+    let consumer: StreamConsumer = kafka_config.create().expect("Failed to create Consumer");
 
     consumer
         .subscribe(&[&config.kafka_topic])
@@ -64,33 +58,4 @@ pub async fn send_message(message: &Message, topic: &str, producer: &mut FutureP
     let data = serde_json::to_string(message).unwrap();
     let record: FutureRecord<String, String> = FutureRecord::to(topic).payload(&data);
     producer.send(record, Duration::from_secs(1)).await.unwrap();
-}
-
-#[derive(Debug, Snafu)]
-pub enum BoilerplateParseIPCError {
-    #[snafu(display("Did not receive requested IPC message within specified timeframe"))]
-    TimedOutWaitingForIPC {},
-}
-
-pub async fn boilerplate_parse_ipc<T>(
-    mut ipc_parser: T,
-    mut rx: Receiver<IPCData>,
-    timeout: Duration,
-) -> Result<(), BoilerplateParseIPCError>
-where
-    T: FnMut(IPCData) -> bool,
-{
-    tokio::select! {
-        _ = sleep(timeout) => {
-            return Err(BoilerplateParseIPCError::TimedOutWaitingForIPC {});
-        }
-        result = async {
-            while let Ok(m) = rx.recv().await {
-                if ipc_parser(m) {
-                    return Ok(());
-                }
-            }
-            Ok(())
-        } => result
-    }
 }

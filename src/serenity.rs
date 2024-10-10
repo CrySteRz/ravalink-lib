@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use crate::{init_ravalink, Ravalink, RavalinkConfig};
 use serenity::prelude::TypeMapKey;
-// pub use serenity::client::ClientBuilder;
 pub use serenity::client::ClientBuilder;
 use serenity::*;
 use tokio::sync::Mutex;
@@ -16,7 +15,6 @@ impl TypeMapKey for RavalinkKey {
 
 pub trait SerenityInit {
     #[must_use]
-    /// Initializes ravalink and registers it in the Serenity type-map
     fn register_ravalink(self, broker: String, config: RavalinkConfig) -> Self;
 }
 
